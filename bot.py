@@ -201,7 +201,7 @@ async def send_ntfy(session: aiohttp.ClientSession, title: str, message: str, pr
             f"https://ntfy.sh/{NTFY_TOPIC}",
             data=clean.encode("utf-8"),
             headers={
-                "Title": title.encode("utf-8"),
+                "Title": title,
                 "Priority": priority,
                 "Tags": "warning,ukraine",
             },
