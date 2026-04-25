@@ -195,7 +195,9 @@ async def send_telegram(session: aiohttp.ClientSession, text: str):
 async def send_ntfy(session: aiohttp.ClientSession, title: str, message: str, priority: str = "high"):
     """Отправить push-уведомление через ntfy.sh."""
     import re as _re
+    import html as _html
     clean = _re.sub(r"<[^>]+>", "", message)
+    clean = _html.unescape(clean).strip()
     try:
         async with session.post(
             f"https://ntfy.sh/{NTFY_TOPIC}",
@@ -203,7 +205,7 @@ async def send_ntfy(session: aiohttp.ClientSession, title: str, message: str, pr
             headers={
                 "Title": title,
                 "Priority": priority,
-                "Tags": "warning",
+                "Tags": "loudspeaker",
             },
             timeout=aiohttp.ClientTimeout(total=10)
         ) as resp:
