@@ -203,7 +203,7 @@ async def send_ntfy(session: aiohttp.ClientSession, title: str, message: str, pr
             headers={
                 "Title": title,
                 "Priority": priority,
-                "Tags": "warning,ukraine",
+                "Tags": "warning",
             },
             timeout=aiohttp.ClientTimeout(total=10)
         ) as resp:
