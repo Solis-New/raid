@@ -25,8 +25,16 @@ logger = logging.getLogger(__name__)
 # Токен от @BotFather
 BOT_TOKEN = os.getenv("BOT_TOKEN", "ВАШ_BOT_TOKEN")
 
-# Ваш chat_id (узнать: написать /start боту @userinfobot)
-MY_CHAT_ID = int(os.getenv("MY_CHAT_ID", "0"))
+# ntfy.sh топик для push-уведомлений на телефон
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "raidalert")
+
+# chat_id получателей через запятую (узнать: написать /start боту @userinfobot)
+# Пример: MY_CHAT_IDS=649032763,987654321
+CHAT_IDS = [
+    int(i.strip())
+    for i in os.getenv("MY_CHAT_IDS", os.getenv("MY_CHAT_ID", "0")).split(",")
+    if i.strip().lstrip("-").isdigit()
+]
 
 # Публичные каналы для мониторинга (username без @)
 # Найдите нужные севастопольские каналы и вставьте сюда
@@ -174,17 +182,35 @@ async def fetch_channel_posts(session: aiohttp.ClientSession, channel: str) -> l
 
 
 async def send_telegram(session: aiohttp.ClientSession, text: str):
-    """Отправить сообщение через Bot API."""
+    """Отправить сообщение всем получателям."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": MY_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML"
-    }
-    async with session.post(url, json=payload) as resp:
-        if resp.status != 200:
-            body = await resp.text()
-            logger.error(f"Telegram API error: {body}")
+    for chat_id in CHAT_IDS:
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+        async with session.post(url, json=payload) as resp:
+            if resp.status != 200:
+                body = await resp.text()
+                logger.error(f"Telegram API error (chat {chat_id}): {body}")
+
+
+async def send_ntfy(session: aiohttp.ClientSession, title: str, message: str, priority: str = "high"):
+    """Отправить push-уведомление через ntfy.sh."""
+    import re as _re
+    clean = _re.sub(r"<[^>]+>", "", message)
+    try:
+        async with session.post(
+            f"https://ntfy.sh/{NTFY_TOPIC}",
+            data=clean.encode("utf-8"),
+            headers={
+                "Title": title.encode("utf-8"),
+                "Priority": priority,
+                "Tags": "warning,ukraine",
+            },
+            timeout=aiohttp.ClientTimeout(total=10)
+        ) as resp:
+            if resp.status != 200:
+                logger.error(f"ntfy error: {resp.status}")
+    except Exception as e:
+        logger.error(f"ntfy send error: {e}")
 
 
 async def check_all_channels(session: aiohttp.ClientSession):
@@ -204,6 +230,16 @@ async def check_all_channels(session: aiohttp.ClientSession):
             if msg_type:
                 notification = build_notification(msg_type, channel, post["text"])
                 await send_telegram(session, notification)
+
+                # Push-уведомление на телефон
+                ntfy_titles = {
+                    "raid_closed": "🚫 РЕЙД ЗАКРЫТ",
+                    "raid_open":   "✅ РЕЙД ОТКРЫТ",
+                    "alert":       "🚨 ТРЕВОГА / БПЛА",
+                }
+                ntfy_priority = "urgent" if msg_type == "alert" else "high"
+                await send_ntfy(session, ntfy_titles[msg_type], post["text"][:200], ntfy_priority)
+
                 logger.info(f"[{msg_type}] из @{channel}: {post['text'][:60]}...")
 
             # Запоминаем пост
