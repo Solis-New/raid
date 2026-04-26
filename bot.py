@@ -10,7 +10,9 @@ import logging
 import re
 import json
 import aiohttp
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+MSK = timezone(timedelta(hours=3))  # Москва / Севастополь UTC+3
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -71,8 +73,8 @@ RAID_OPEN = [
     r"рейд\s*(открыт|возобновлен|работает)",
     r"катер[аы]?\s*(ход[яу]т|открыт|работа)",
     r"переправ[аы]?\s*(открыт|возобновлен|работает)",
-    r"движение\s*(возобновлено|восстановлено)",
-    r"морской\s*пассажирск\w+\s*транспорт\s*возобновил",
+    r"движение\s*(возобновлено|восстановлено|возобновляет)",
+    r"морской\s*пассажирск\w+\s*транспорт\s*возобновл",
     r"рейд.*открыт",
     r"открыт.*рейд",
     r"катера\s*работают",
@@ -129,7 +131,7 @@ def classify(text: str) -> str | None:
 
 
 def build_notification(msg_type: str, channel: str, text: str) -> str:
-    time_str = datetime.now().strftime("%H:%M")
+    time_str = datetime.now(MSK).strftime("%H:%M")
     preview = text[:350].strip()
     if len(text) > 350:
         preview += "..."
