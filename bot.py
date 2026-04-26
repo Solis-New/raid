@@ -231,6 +231,12 @@ async def check_all_channels(session: aiohttp.ClientSession):
 
             # Новый пост — классифицируем
             msg_type = classify(post["text"])
+
+            # Фильтр по каналу: рейд только из sevdortrans_ru, тревога только из alertsev
+            if msg_type in ("raid_closed", "raid_open") and channel != "sevdortrans_ru":
+                msg_type = None
+            if msg_type == "alert" and channel != "alertsev":
+                msg_type = None
             if msg_type:
                 notification = build_notification(msg_type, channel, post["text"])
                 await send_telegram(session, notification)
