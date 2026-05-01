@@ -44,7 +44,7 @@ CHANNELS = [
     c.strip()
     for c in os.getenv(
         "CHANNELS",
-        "sevdortrans_ru,alertsev"
+        "sevdortrans_ru,alertsev,raid_test"
     ).split(",")
 ]
 
@@ -165,24 +165,39 @@ async def fetch_channel_posts(session: aiohttp.ClientSession, channel: str) -> l
 
             posts = []
             # Ищем посты с временем публикации
-            blocks = re.findall(
-                r'data-post="([^"]+)".*?<time[^>]*datetime="([^"]+)".*?<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>',
+            now = datetime.now(timezone.utc)
+
+            # Извлекаем все посты с ID
+            all_blocks = re.findall(
+                r'data-post="([^"]+)"(.*?)</div>\s*</div>\s*</div>',
                 html, re.DOTALL
             )
-            now = datetime.now(timezone.utc)
-            for post_id, dt_str, raw_text in blocks:
-                try:
-                    # Парсим время поста
-                    from datetime import timezone as tz
-                    post_time = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-                    age_minutes = (now - post_time).total_seconds() / 60
-                    # Берём только посты не старше 6 минут
-                    if age_minutes > 6:
+
+            for post_id, block_html in all_blocks:
+                # Ищем время поста
+                time_match = re.search(r'datetime="([^"]+)"', block_html)
+                if time_match:
+                    try:
+                        post_time = datetime.fromisoformat(
+                            time_match.group(1).replace("Z", "+00:00")
+                        )
+                        age_minutes = (now - post_time).total_seconds() / 60
+                        if age_minutes > 7:
+                            continue
+                    except Exception:
                         continue
-                except Exception:
+                else:
                     continue
 
-                clean = re.sub(r'<[^>]+>', ' ', raw_text)
+                # Извлекаем текст
+                text_match = re.search(
+                    r'<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>',
+                    block_html, re.DOTALL
+                )
+                if not text_match:
+                    continue
+
+                clean = re.sub(r'<[^>]+>', ' ', text_match.group(1))
                 clean = re.sub(r'\s+', ' ', clean).strip()
                 if clean:
                     posts.append({"id": post_id, "text": clean})
