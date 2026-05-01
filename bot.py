@@ -153,7 +153,7 @@ def build_notification(msg_type: str, channel: str, text: str) -> str:
 
 
 async def fetch_channel_posts(session: aiohttp.ClientSession, channel: str) -> list[dict]:
-    """Получить последние посты из публичного канала через веб."""
+    """Получить посты за последние 6 минут из публичного канала."""
     url = f"https://t.me/s/{channel}"
     headers = {"User-Agent": "Mozilla/5.0 (compatible; AlertBot/1.0)"}
     try:
@@ -163,21 +163,32 @@ async def fetch_channel_posts(session: aiohttp.ClientSession, channel: str) -> l
                 return []
             html = await resp.text()
 
-            # Извлекаем ID постов и текст
             posts = []
-            # Ищем блоки сообщений
-            message_blocks = re.findall(
-                r'data-post="([^"]+)".*?<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>',
+            # Ищем посты с временем публикации
+            blocks = re.findall(
+                r'data-post="([^"]+)".*?<time[^>]*datetime="([^"]+)".*?<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>',
                 html, re.DOTALL
             )
-            for post_id, raw_text in message_blocks:
-                # Чистим HTML теги
+            now = datetime.now(timezone.utc)
+            for post_id, dt_str, raw_text in blocks:
+                try:
+                    # Парсим время поста
+                    from datetime import timezone as tz
+                    post_time = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+                    age_minutes = (now - post_time).total_seconds() / 60
+                    # Берём только посты не старше 6 минут
+                    if age_minutes > 6:
+                        continue
+                except Exception:
+                    continue
+
                 clean = re.sub(r'<[^>]+>', ' ', raw_text)
                 clean = re.sub(r'\s+', ' ', clean).strip()
                 if clean:
                     posts.append({"id": post_id, "text": clean})
 
-            return posts[-20:]  # последние 20 постов
+            logger.info(f"Канал {channel}: найдено {len(posts)} свежих постов")
+            return posts
     except Exception as e:
         logger.error(f"Ошибка чтения {channel}: {e}")
         return []
@@ -262,25 +273,16 @@ async def check_all_channels(session: aiohttp.ClientSession):
 
 
 async def main():
-    logger.info("Запуск бота...")
+    logger.info("Запуск бота (GitHub Actions режим)...")
     logger.info(f"Каналы: {CHANNELS}")
-    logger.info(f"Интервал: {CHECK_INTERVAL} сек.")
 
     async with aiohttp.ClientSession() as session:
-        # Стартовое уведомление
-        await send_telegram(session,
-            "✅ <b>Бот запущен!</b>\n\n"
-            f"📡 Каналов: {len(CHANNELS)}\n"
-            f"🔄 Проверка каждые {CHECK_INTERVAL} сек.\n"
-            "🔍 Слежу за: рейд, катера, БПЛА, тревога"
-        )
+        try:
+            await check_all_channels(session)
+        except Exception as e:
+            logger.error(f"Ошибка: {e}")
 
-        while True:
-            try:
-                await check_all_channels(session)
-            except Exception as e:
-                logger.error(f"Ошибка цикла: {e}")
-            await asyncio.sleep(CHECK_INTERVAL)
+    logger.info("Проверка завершена.")
 
 
 if __name__ == "__main__":
