@@ -36,7 +36,7 @@ CHAT_IDS = [
 
 CHANNELS = [
     c.strip()
-    for c in os.getenv("CHANNELS", "sevdortrans_ru,alertsev,raid_test").split(",")
+    for c in os.getenv("CHANNELS", "sevdortrans_ru,alertsev").split(",")
 ]
 
 # ═══════════════════════════════════════════════════════════════════
