@@ -1,7 +1,7 @@
+cat > /mnt/user-data/outputs/sev_alert_bot_v2/bot.py << 'ENDOFFILE'
 """
 Бот оповещений для Севастополя — БЕЗ Telethon и API ключей.
 Читает публичные Telegram-каналы через t.me/s/канал (веб-версия).
-Нужен только Bot Token от @BotFather.
 """
 
 import os
@@ -9,10 +9,11 @@ import asyncio
 import logging
 import re
 import html
+import json
 import aiohttp
 from datetime import datetime, timezone, timedelta
 
-MSK = timezone(timedelta(hours=3))  # Москва / Севастополь UTC+3
+MSK = timezone(timedelta(hours=3))
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN  = os.getenv("BOT_TOKEN",  "ВАШ_BOT_TOKEN")
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "raidalert")
+CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
 
 CHAT_IDS = [
     int(i.strip())
@@ -80,6 +82,24 @@ ALERT = [
 IGNORE = ["реклама", "акция", "скидка", "конкурс", "розыгрыш", "подписывайтесь"]
 
 # ═══════════════════════════════════════════════════════════════════
+#  ХРАНИЛИЩЕ
+# ═══════════════════════════════════════════════════════════════════
+
+seen_file = "seen_posts.json"
+
+def load_seen() -> dict:
+    if os.path.exists(seen_file):
+        with open(seen_file) as f:
+            return json.load(f)
+    return {}
+
+def save_seen(data: dict):
+    with open(seen_file, "w") as f:
+        json.dump(data, f)
+
+seen_posts: dict = load_seen()
+
+# ═══════════════════════════════════════════════════════════════════
 #  ЛОГИКА
 # ═══════════════════════════════════════════════════════════════════
 
@@ -120,7 +140,6 @@ def build_notification(msg_type: str, channel: str, text: str) -> str:
 
 
 async def fetch_channel_posts(session: aiohttp.ClientSession, channel: str) -> list[dict]:
-    """Получить посты за последние 7 минут из публичного канала."""
     url = f"https://t.me/s/{channel}"
     headers = {"User-Agent": "Mozilla/5.0 (compatible; AlertBot/1.0)"}
     try:
@@ -131,39 +150,23 @@ async def fetch_channel_posts(session: aiohttp.ClientSession, channel: str) -> l
             page = await resp.text()
 
         posts = []
-        now = datetime.now(timezone.utc)
-
         blocks = re.findall(
             r'data-post="([^"]+)"(.*?)</div>\s*</div>\s*</div>',
             page, re.DOTALL
         )
-
         for post_id, block in blocks:
-            t_match = re.search(r'datetime="([^"]+)"', block)
-            if not t_match:
-                continue
-            try:
-                post_time = datetime.fromisoformat(t_match.group(1).replace("Z", "+00:00"))
-                if (now - post_time).total_seconds() > 7 * 60:
-                    continue
-            except Exception:
-                continue
-
             tx_match = re.search(
                 r'<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>',
                 block, re.DOTALL
             )
             if not tx_match:
                 continue
-
             clean = re.sub(r'<[^>]+>', ' ', tx_match.group(1))
             clean = html.unescape(re.sub(r'\s+', ' ', clean).strip())
             if clean:
                 posts.append({"id": post_id, "text": clean})
 
-        logger.info(f"Канал @{channel}: найдено {len(posts)} свежих постов")
-        return posts
-
+        return posts[-20:]
     except Exception as e:
         logger.error(f"Ошибка чтения @{channel}: {e}")
         return []
@@ -197,8 +200,12 @@ async def send_ntfy(session: aiohttp.ClientSession, title: str, message: str, pr
 async def check_all_channels(session: aiohttp.ClientSession):
     for channel in CHANNELS:
         posts = await fetch_channel_posts(session, channel)
+        channel_seen = seen_posts.get(channel, [])
 
         for post in posts:
+            if post["id"] in channel_seen:
+                continue
+
             msg_type = classify(post["text"])
             logger.info(f"Пост @{channel}: '{post['text'][:60]}' -> {msg_type}")
 
@@ -223,17 +230,34 @@ async def check_all_channels(session: aiohttp.ClientSession):
 
                 logger.info(f"✅ Отправлено [{msg_type}] из @{channel}")
 
+            channel_seen.append(post["id"])
+
+        seen_posts[channel] = channel_seen[-100:]
+
+    save_seen(seen_posts)
+
 
 async def main():
-    logger.info("Запуск бота (GitHub Actions режим)...")
+    logger.info("Запуск бота...")
     logger.info(f"Каналы: {CHANNELS}")
+    logger.info(f"Интервал: {CHECK_INTERVAL} сек.")
+
     async with aiohttp.ClientSession() as session:
-        try:
-            await check_all_channels(session)
-        except Exception as e:
-            logger.error(f"Ошибка: {e}")
-    logger.info("Проверка завершена.")
+        await send_telegram(session,
+            "✅ <b>Бот запущен!</b>\n\n"
+            f"📡 Каналов: {len(CHANNELS)}\n"
+            f"🔄 Проверка каждые {CHECK_INTERVAL} сек.\n"
+            "🔍 Слежу за: рейд, катера, БПЛА, тревога"
+        )
+        while True:
+            try:
+                await check_all_channels(session)
+            except Exception as e:
+                logger.error(f"Ошибка цикла: {e}")
+            await asyncio.sleep(CHECK_INTERVAL)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+ENDOFFILE
+echo "Done"
