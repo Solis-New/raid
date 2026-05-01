@@ -1,4 +1,3 @@
-cat > /mnt/user-data/outputs/sev_alert_bot_v2/bot.py << 'ENDOFFILE'
 """
 Бот оповещений для Севастополя — БЕЗ Telethon и API ключей.
 Читает публичные Telegram-каналы через t.me/s/канал (веб-версия).
@@ -259,5 +258,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-ENDOFFILE
-echo "Done"
